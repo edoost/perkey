@@ -173,7 +173,7 @@ def train_seq2seq(input_filename, output_filename, model_dir):
         
         # evaluatation
         print('\nEvaluation:')
-        predictions = est.predict(input_fn=test_input_func)
+        predictions = est.predict(input_fn=dev_input_func)
 
         # writing the predictions into a file
         print('\n\nWriting Predictions...')
