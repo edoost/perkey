@@ -15,9 +15,6 @@ print('*** Tensorflow executing eagerly:', tf.executing_eagerly(), '\n')
 
 data_loader = DataLoader()
 
-round_nums = 100
-num_steps = 1000
-
 beam_width = 50
 
 SOS_TOKEN = 1
@@ -166,12 +163,13 @@ def train_seq2seq(input_filename, output_filename, model_dir):
     train_input_func = lambda: input_fn(config.source_data_train, config.target_data_train, params['batch_size'], shuffle_buffer=1000)
     eval_input_func = lambda: input_fn(config.source_data_dev, config.target_data_dev, params['batch_size'])
     test_input_func = lambda: input_fn(config.source_data_test, config.target_data_test, params['batch_size'])
-
+    
+    # first train for 20000 stpes
     est.train(input_fn=train_input_func, steps=20000)
-    for r in range(num_rounds):
+    for r in range(cfg.num_rounds):
         # training for num_steps steps
         print('\nRound', r + 1)
-        est.train(input_fn=train_input_func, steps=num_steps)
+        est.train(input_fn=train_input_func, steps=cfg.num_steps)
         
         # evaluatation
         print('\nEvaluation:')
