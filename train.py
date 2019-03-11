@@ -1,18 +1,17 @@
 import os
-import logging
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import layers
 from data_loader import DataLoader
-from common import config
+from common import config as cfg
 from pr import precision_and_recall
 from rouge import rouge
 
 
-#tf.enable_eager_execution()
+# tf.enable_eager_execution()
 print('*** Tensorflow executing eagerly:', tf.executing_eagerly(), '\n')
 
-#os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 
 data_loader = DataLoader()
 
@@ -29,8 +28,6 @@ def seq2seq(mode, features, labels, params):
     vocab_size = params['vocab_size']
     embed_dim = params['embed_dim']
     num_units = params['num_units']
-    #input_max_length = params['input_max_length']
-    #output_max_length = params['output_max_length']
 
     inp = features['encoder_inputs']
     decoder_output = features['decoder_outputs']
@@ -171,14 +168,16 @@ def train_seq2seq(input_filename, output_filename, model_dir):
     test_input_func = lambda: input_fn(config.source_data_test, config.target_data_test, params['batch_size'])
 
     est.train(input_fn=train_input_func, steps=20000)
-    for round_num in range(round_nums):
-        print('\nRound', round_num + 1)
+    for r in range(num_rounds):
+        # training for num_steps steps
+        print('\nRound', r + 1)
         est.train(input_fn=train_input_func, steps=num_steps)
+        
+        # evaluatation
         print('\nEvaluation:')
-        #est.evaluate(input_fn=eval_input_func)
-
         predictions = est.predict(input_fn=test_input_func)
 
+        # writing the predictions into a file
         print('\n\nWriting Predictions...')
         for i, pred in enumerate(predictions):
             with open('./predictions/' + str(i), 'w+') as pred_file:
@@ -186,13 +185,13 @@ def train_seq2seq(input_filename, output_filename, model_dir):
                     pred_file.write(data_loader.index_to_sent(keyph).replace('<EOS>', '')
                                                                     .replace('<UNK>', '')
                                                                     .replace('<SOS>', '') + '\n')
-
-        precision_and_recall(round_num)
-        r(5)
-        r(10)
+                    
+        # running the evaluation metrics, precision, recall, f1-score, and ROUGE
+        precision_and_recall(r)
+        rouge(5)
+        rouge(10)
 
 def main():
-    tf.logging.set_verbosity(logging.INFO)
     train_seq2seq('input', 'output', 'model/seq2seq')
 
 if __name__ == '__main__':
