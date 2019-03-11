@@ -103,4 +103,27 @@ def seq2seq(mode, features, labels, params):
                                                                    impute_finished=False,
                                                                    maximum_iterations=5)
 
+    if mode == 'train':
+        weights = tf.to_float(tf.sign(decoder_output))
+
+        loss = tf.contrib.seq2seq.sequence_loss(train_outputs.rnn_output, decoder_output, weights=weights)
+
+        optimizer = tf.train.AdamOptimizer(1e-3)
+        gradients, variables = zip(*optimizer.compute_gradients(loss))
+        gradients, _ = tf.clip_by_global_norm(gradients, .1)
+        optimize = optimizer.apply_gradients(zip(gradients, variables), tf.train.get_global_step())
+
+        print('***', tf.global_norm(gradients))
+
+        #train_op = layers.optimize_loss(loss_op, tf.train.get_global_step(),
+        #                                optimizer=tf.train.AdamOptimizer(),
+        #                                learning_rate=params.get('learning_rate', 0.001),
+        #                                summaries=['loss', 'learning_rate'])
+
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=None,
+                                          loss=loss, train_op=optimize)
+
+    else:
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=pred_outputs.predicted_ids)
+
 
