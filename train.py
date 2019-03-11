@@ -126,4 +126,74 @@ def seq2seq(mode, features, labels, params):
     else:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=pred_outputs.predicted_ids)
 
+def train_seq2seq(input_filename, output_filename, model_dir):
+    params = {
+        'vocab_size': config.num_words,
+        'batch_size': 32,
+        'input_max_length': config.input_max_length,
+        'output_max_length': config.output_max_length,
+        'embed_dim': 150,
+        'num_units': 256
+    }
 
+    def input_fn(input_filename, output_filename, batch_size, shuffle_buffer=1):
+
+        encoder_input_data_gen = lambda: data_loader.data_generator_3(input_filename, is_encoder_input=True)
+        decoder_output_data_gen = lambda: data_loader.data_generator_3(output_filename)
+        decoder_input_data_gen = lambda: data_loader.data_generator_3(output_filename, is_decoder_input=True)
+
+        encoder_input_data = tf.data.Dataset.from_generator(encoder_input_data_gen,
+                                                            output_types=tf.int32,
+                                                            output_shapes=(None,))
+        decoder_output_data = tf.data.Dataset.from_generator(decoder_output_data_gen,
+                                                             output_types=tf.int32,
+                                                             output_shapes=(None,))
+        decoder_input_data = tf.data.Dataset.from_generator(decoder_input_data_gen,
+                                                            output_types=tf.int32,
+                                                            output_shapes=(None,))
+
+        dataset = tf.data.Dataset.zip((encoder_input_data, decoder_output_data, decoder_input_data)).shuffle(shuffle_buffer).repeat(1).padded_batch(batch_size,
+                                                                                                                                                    padded_shapes=([None],[None],[None]))
+
+        iterator = dataset.make_one_shot_iterator()
+
+        encoder_inputs, decoder_outputs, decoder_inputs = iterator.get_next()
+
+        return {'encoder_inputs': encoder_inputs, 'decoder_outputs': decoder_outputs, 'decoder_inputs': decoder_inputs}
+
+
+    est = tf.estimator.Estimator(model_fn=seq2seq,
+                                 model_dir=model_dir,
+                                 params=params)
+
+    train_input_func = lambda: input_fn(config.source_data_train, config.target_data_train, params['batch_size'], shuffle_buffer=1000)
+    eval_input_func = lambda: input_fn(config.source_data_dev, config.target_data_dev, params['batch_size'])
+    test_input_func = lambda: input_fn(config.source_data_test, config.target_data_test, params['batch_size'])
+
+    est.train(input_fn=train_input_func, steps=20000)
+    for round_num in range(round_nums):
+        print('\nRound', round_num + 1)
+        est.train(input_fn=train_input_func, steps=num_steps)
+        print('\nEvaluation:')
+        #est.evaluate(input_fn=eval_input_func)
+
+        predictions = est.predict(input_fn=test_input_func)
+
+        print('\n\nWriting Predictions...')
+        for i, pred in enumerate(predictions):
+            with open('./predictions/' + str(i), 'w+') as pred_file:
+                for keyph in np.array(pred).T:
+                    pred_file.write(data_loader.index_to_sent(keyph).replace('<EOS>', '')
+                                                                    .replace('<UNK>', '')
+                                                                    .replace('<SOS>', '') + '\n')
+
+        precision_and_recall(round_num)
+        r(5)
+        r(10)
+
+def main():
+    tf.logging.set_verbosity(logging.INFO)
+    train_seq2seq('input', 'output', 'model/seq2seq')
+
+if __name__ == '__main__':
+    main()
