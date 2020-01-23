@@ -47,7 +47,7 @@ def seq2seq(mode, features, labels, params):
     cell = tf.contrib.rnn.GRUCell(num_units=num_units)
     encoder_outputs, encoder_final_state = tf.nn.dynamic_rnn(cell, input_embed, dtype=tf.float32)
 
-    train_helper = tf.contrib.seq2seq.TrainingHelper(output_embed, input_lengths)
+    train_helper = tf.contrib.seq2seq.TrainingHelper(output_embed, output_lengths)
 
     def dec_cell(encoder_outputs, input_lengths):
         attention = tf.contrib.seq2seq.BahdanauAttention(
