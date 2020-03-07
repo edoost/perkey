@@ -1,11 +1,13 @@
 import os
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.contrib import layers
+from rouge import rouge
+
 from data_loader import DataLoader
 from common import config as cfg
 from pr import precision_and_recall
-from rouge import rouge
 
 
 # tf.enable_eager_execution()
@@ -15,17 +17,8 @@ print('*** Tensorflow executing eagerly:', tf.executing_eagerly(), '\n')
 
 data_loader = DataLoader()
 
-beam_width = 50
 
-SOS_TOKEN = 1
-EOS_TOKEN = 2
-UNK_TOKEN = 3
-
-def seq2seq(mode, features, labels, params):
-    vocab_size = params['vocab_size']
-    embed_dim = params['embed_dim']
-    num_units = params['num_units']
-
+def seq2seq(mode, features, labels):
     inp = features['encoder_inputs']
     decoder_output = features['decoder_outputs']
     decoder_input = features['decoder_inputs']
@@ -33,34 +26,34 @@ def seq2seq(mode, features, labels, params):
     batch_size = tf.shape(inp)[0]
     output_max_length = tf.shape(decoder_output)[1]
 
-    start_tokens = tf.to_int32(tf.fill([batch_size], SOS_TOKEN))
+    start_tokens = tf.to_int32(tf.fill([batch_size], cfg.SOS_TOKEN))
     train_output = tf.concat([tf.expand_dims(start_tokens, 1), decoder_input], 1)
 
     input_lengths = tf.count_nonzero(inp, 1, dtype=tf.int32)
     output_lengths = tf.count_nonzero(train_output, 1, dtype=tf.int32)
 
-    embeddings = tf.get_variable('embeddings', [config.num_words, embed_dim])
+    embeddings = tf.get_variable('embeddings', [cfg.num_words, cfg.embed_dim])
 
     input_embed = tf.nn.embedding_lookup(embeddings, inp)
     output_embed = tf.nn.embedding_lookup(embeddings, train_output)
 
-    cell = tf.contrib.rnn.GRUCell(num_units=num_units)
+    cell = tf.contrib.rnn.GRUCell(num_units=cfg.num_units)
     encoder_outputs, encoder_final_state = tf.nn.dynamic_rnn(cell, input_embed, dtype=tf.float32)
 
     train_helper = tf.contrib.seq2seq.TrainingHelper(output_embed, output_lengths)
 
     def dec_cell(encoder_outputs, input_lengths):
         attention = tf.contrib.seq2seq.BahdanauAttention(
-            num_units = num_units,
+            num_units = cfg.num_units,
             memory = encoder_outputs,
             memory_sequence_length = input_lengths)
 
         wrapper = tf.contrib.seq2seq.AttentionWrapper(
-            cell = tf.contrib.rnn.GRUCell(num_units=num_units),
+            cell = tf.contrib.rnn.GRUCell(num_units=cfg.num_units),
             attention_mechanism = attention,
-            attention_layer_size = num_units)
+            attention_layer_size = cfg.num_units)
 
-        return tf.contrib.rnn.OutputProjectionWrapper(wrapper, vocab_size)
+        return tf.contrib.rnn.OutputProjectionWrapper(wrapper, cfg.vocab_size)
 
     with tf.variable_scope('decoding_scope'):
         if mode == 'train':
@@ -76,20 +69,20 @@ def seq2seq(mode, features, labels, params):
                                                                     maximum_iterations=output_max_length)
 
         else:
-            tiled_encoder_outputs = tf.contrib.seq2seq.tile_batch(encoder_outputs, multiplier=beam_width)
-            tiled_encoder_final_state = tf.contrib.seq2seq.tile_batch(encoder_final_state, multiplier=beam_width)
-            tiled_sequence_length = tf.contrib.seq2seq.tile_batch(input_lengths, multiplier=beam_width)
+            tiled_encoder_outputs = tf.contrib.seq2seq.tile_batch(encoder_outputs, multiplier=cfg.beam_width)
+            tiled_encoder_final_state = tf.contrib.seq2seq.tile_batch(encoder_final_state, multiplier=cfg.beam_width)
+            tiled_sequence_length = tf.contrib.seq2seq.tile_batch(input_lengths, multiplier=cfg.beam_width)
 
             cell = dec_cell(tiled_encoder_outputs, tiled_sequence_length)
 
-            decoder_initial_state = cell.zero_state(dtype=tf.float32, batch_size=batch_size * beam_width)
+            decoder_initial_state = cell.zero_state(dtype=tf.float32, batch_size=batch_size * cfg.beam_width)
             decoder_initial_state = decoder_initial_state.clone(cell_state=tiled_encoder_final_state)
 
             decoder = tf.contrib.seq2seq.BeamSearchDecoder(cell, embeddings,
                                                            start_tokens=start_tokens,
-                                                           end_token=EOS_TOKEN,
+                                                           end_token=cfg.EOS_TOKEN,
                                                            initial_state=decoder_initial_state,
-                                                           beam_width=beam_width,
+                                                           beam_width=cfg.beam_width,
                                                            length_penalty_weight=0.0)
 
             pred_outputs, _, _ = tf.contrib.seq2seq.dynamic_decode(decoder=decoder,
@@ -109,10 +102,10 @@ def seq2seq(mode, features, labels, params):
 
         print('***', tf.global_norm(gradients))
 
-        #train_op = layers.optimize_loss(loss_op, tf.train.get_global_step(),
-        #                                optimizer=tf.train.AdamOptimizer(),
-        #                                learning_rate=params.get('learning_rate', 0.001),
-        #                                summaries=['loss', 'learning_rate'])
+        # train_op = layers.optimize_loss(loss_op, tf.train.get_global_step(),
+        #                                 optimizer=tf.train.AdamOptimizer(),
+        #                                 learning_rate=params.get('learning_rate', 0.001),
+        #                                 summaries=['loss', 'learning_rate'])
 
         return tf.estimator.EstimatorSpec(mode=mode, predictions=None,
                                           loss=loss, train_op=optimize)
@@ -120,16 +113,8 @@ def seq2seq(mode, features, labels, params):
     else:
         return tf.estimator.EstimatorSpec(mode=mode, predictions=pred_outputs.predicted_ids)
 
-def train_seq2seq(input_filename, output_filename, model_dir):
-    params = {
-        'vocab_size': config.num_words,
-        'batch_size': 32,
-        'input_max_length': config.input_max_length,
-        'output_max_length': config.output_max_length,
-        'embed_dim': 150,
-        'num_units': 256
-    }
-
+    
+def train_seq2seq(input_filename, output_filename, model_dir):    
     def input_fn(input_filename, output_filename, batch_size, shuffle_buffer=1):
 
         encoder_input_data_gen = lambda: data_loader.data_generator_3(input_filename, is_encoder_input=True)
@@ -160,9 +145,9 @@ def train_seq2seq(input_filename, output_filename, model_dir):
                                  model_dir=model_dir,
                                  params=params)
 
-    train_input_func = lambda: input_fn(config.source_data_train, config.target_data_train, params['batch_size'], shuffle_buffer=1000)
-    eval_input_func = lambda: input_fn(config.source_data_dev, config.target_data_dev, params['batch_size'])
-    test_input_func = lambda: input_fn(config.source_data_test, config.target_data_test, params['batch_size'])
+    train_input_func = lambda: input_fn(cfg..source_data_train, cfg.target_data_train, cfg.batch_size, shuffle_buffer=1000)
+    eval_input_func = lambda: input_fn(cfg.source_data_dev, cfg.target_data_dev, cfg.batch_size)
+    test_input_func = lambda: input_fn(cfg.source_data_test, cfg.target_data_test, cfg.batch_size)
     
     # first train for 20000 stpes
     est.train(input_fn=train_input_func, steps=20000)
@@ -189,8 +174,10 @@ def train_seq2seq(input_filename, output_filename, model_dir):
         rouge(5)
         rouge(10)
 
+        
 def main():
     train_seq2seq('input', 'output', 'model/seq2seq')
 
+    
 if __name__ == '__main__':
     main()
